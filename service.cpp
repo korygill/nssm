@@ -1,6 +1,6 @@
 #include "nssm.h"
 
-bool is_admin;
+BOOL is_admin;
 bool use_critical_section;
 
 extern imports_t imports;
@@ -195,7 +195,7 @@ int affinity_string_to_mask(TCHAR *string, __int64 *mask) {
   list_t set[64];
 
   TCHAR *s = string;
-  TCHAR *end;
+  TCHAR *end = 0;
   int ret;
   int i;
   int n = 0;
@@ -244,7 +244,7 @@ int affinity_string_to_mask(TCHAR *string, __int64 *mask) {
   }
 
   for (i = 0; i <= n; i++) {
-    for (int j = set[i].first; j <= set[i].last; j++) (__int64) *mask |= (1LL << (__int64) j);
+    for (int j = set[i].first; j <= set[i].last; j++) *mask |= ((__int64) 1 << j);
   }
 
   return 0;
@@ -925,7 +925,7 @@ int pre_edit_service(int argc, TCHAR **argv) {
 
   const TCHAR *parameter = 0;
   settings_t *setting = 0;
-  TCHAR *additional;
+  TCHAR *additional = 0;
 
   /* Validate the parameter. */
   if (mandatory > 2) {
@@ -1065,7 +1065,7 @@ int pre_edit_service(int argc, TCHAR **argv) {
     return 0;
   }
 
-  HKEY key;
+  HKEY key = 0;
   value_t value;
   int ret;
 
@@ -1658,7 +1658,7 @@ int monitor_service(nssm_service_t *service) {
   if (ret) {
     TCHAR code[16];
     _sntprintf_s(code, _countof(code), _TRUNCATE, _T("%d"), ret);
-    log_event(EVENTLOG_ERROR_TYPE, NSSM_EVENT_START_SERVICE_FAILED, service->exe, service->name, ret, 0);
+    log_event(EVENTLOG_ERROR_TYPE, NSSM_EVENT_START_SERVICE_FAILED, service->exe, service->name, code, 0);
     return ret;
   }
   log_event(EVENTLOG_INFORMATION_TYPE, NSSM_EVENT_STARTED_SERVICE, service->exe, service->flags, service->name, service->dir, 0);
@@ -1898,7 +1898,7 @@ int start_service(nssm_service_t *service) {
     if (si.dwFlags & STARTF_USESTDHANDLES) inherit_handles = true;
     unsigned long flags = service->priority & priority_mask();
     if (service->affinity) flags |= CREATE_SUSPENDED;
-    if (! service->no_console) flags |= CREATE_NEW_CONSOLE;
+    if (! service->no_console) flags |= CREATE_NEW_CONSOLE;
     if (! CreateProcess(0, cmd, 0, 0, inherit_handles, flags, 0, service->dir, &si, &pi)) {
       unsigned long exitcode = 3;
       unsigned long error = GetLastError();
@@ -1943,6 +1943,8 @@ int start_service(nssm_service_t *service) {
 
       ResumeThread(pi.hThread);
     }
+
+    if (pi.hThread) CloseHandle(pi.hThread);
   }
 
   /* Restore our environment. */

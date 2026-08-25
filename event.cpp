@@ -11,7 +11,10 @@ TCHAR *error_string(unsigned long error) {
   TCHAR *error_message = (TCHAR *) TlsGetValue(tls_index);
   if (! error_message) {
     error_message = (TCHAR *) LocalAlloc(LPTR, NSSM_ERROR_BUFSIZE);
-    if (! error_message) return _T("<out of memory for error message>");
+    if (! error_message) {
+      static TCHAR oom[] = _T("<out of memory for error message>");
+      return oom;
+    }
     TlsSetValue(tls_index, (void *) error_message);
   }
 
@@ -25,11 +28,15 @@ TCHAR *error_string(unsigned long error) {
 
 /* Convert message code to format string */
 TCHAR *message_string(unsigned long error) {
-  TCHAR *ret;
+  TCHAR *ret = 0;
   if (! FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_HMODULE | FORMAT_MESSAGE_IGNORE_INSERTS, 0, error, GetUserDefaultLangID(), (LPTSTR) &ret, NSSM_ERROR_BUFSIZE, 0)) {
     if (! FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_HMODULE | FORMAT_MESSAGE_IGNORE_INSERTS, 0, error, 0, (LPTSTR) &ret, NSSM_ERROR_BUFSIZE, 0)) {
-      ret = (TCHAR *) HeapAlloc(GetProcessHeap(), 0, 32 * sizeof(TCHAR));
-      if (_sntprintf_s(ret, NSSM_ERROR_BUFSIZE, _TRUNCATE, _T("system error %lu"), error) < 0) return 0;
+      ret = (TCHAR *) LocalAlloc(LPTR, 32 * sizeof(TCHAR));
+      if (! ret) return 0;
+      if (_sntprintf_s(ret, 32, _TRUNCATE, _T("system error %lu"), error) < 0) {
+        LocalFree(ret);
+        return 0;
+      }
     }
   }
   return ret;

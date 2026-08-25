@@ -21,7 +21,7 @@ static long open_registry_key(const TCHAR *registry, REGSAM sam, HKEY *key, bool
     error = RegCreateKeyEx(HKEY_LOCAL_MACHINE, registry, 0, 0, REG_OPTION_NON_VOLATILE, sam, 0, key, 0);
     if (error != ERROR_SUCCESS) {
       *key = 0;
-      log_event(EVENTLOG_ERROR_TYPE, NSSM_EVENT_OPENKEY_FAILED, registry, error_string(GetLastError()), 0);
+      log_event(EVENTLOG_ERROR_TYPE, NSSM_EVENT_OPENKEY_FAILED, registry, error_string(error), 0);
       return error;
     }
   }
@@ -29,7 +29,7 @@ static long open_registry_key(const TCHAR *registry, REGSAM sam, HKEY *key, bool
     error = RegOpenKeyEx(HKEY_LOCAL_MACHINE, registry, 0, sam, key);
     if (error != ERROR_SUCCESS) {
       *key = 0;
-      if (error != ERROR_FILE_NOT_FOUND || must_exist) log_event(EVENTLOG_ERROR_TYPE, NSSM_EVENT_OPENKEY_FAILED, registry, error_string(GetLastError()), 0);
+      if (error != ERROR_FILE_NOT_FOUND || must_exist) log_event(EVENTLOG_ERROR_TYPE, NSSM_EVENT_OPENKEY_FAILED, registry, error_string(error), 0);
     }
   }
 
@@ -37,8 +37,8 @@ static long open_registry_key(const TCHAR *registry, REGSAM sam, HKEY *key, bool
 }
 
 static HKEY open_registry_key(const TCHAR *registry, REGSAM sam, bool must_exist) {
-  HKEY key;
-  long error = open_registry_key(registry, sam, &key, must_exist);
+  HKEY key = 0;
+  open_registry_key(registry, sam, &key, must_exist);
   return key;
 }
 
@@ -51,8 +51,9 @@ int create_messages() {
     return 1;
   }
 
-  if (RegCreateKeyEx(HKEY_LOCAL_MACHINE, registry, 0, 0, REG_OPTION_NON_VOLATILE, KEY_WRITE, 0, &key, 0) != ERROR_SUCCESS) {
-    log_event(EVENTLOG_ERROR_TYPE, NSSM_EVENT_OPENKEY_FAILED, registry, error_string(GetLastError()), 0);
+  long error = RegCreateKeyEx(HKEY_LOCAL_MACHINE, registry, 0, 0, REG_OPTION_NON_VOLATILE, KEY_WRITE, 0, &key, 0);
+  if (error != ERROR_SUCCESS) {
+    log_event(EVENTLOG_ERROR_TYPE, NSSM_EVENT_OPENKEY_FAILED, registry, error_string(error), 0);
     return 2;
   }
 
@@ -63,6 +64,7 @@ int create_messages() {
   RegSetValueEx(key, _T("EventMessageFile"), 0, REG_SZ, (const unsigned char *) path, (unsigned long) (_tcslen(path) +  1) * sizeof(TCHAR));
   unsigned long types = EVENTLOG_INFORMATION_TYPE | EVENTLOG_WARNING_TYPE | EVENTLOG_ERROR_TYPE;
   RegSetValueEx(key, _T("TypesSupported"), 0, REG_DWORD, (const unsigned char *) &types, sizeof(types));
+  RegCloseKey(key);
 
   return 0;
 }
@@ -1011,7 +1013,7 @@ int get_hook(const TCHAR *service_name, const TCHAR *hook_event, const TCHAR *ho
     log_event(EVENTLOG_ERROR_TYPE, NSSM_EVENT_OUT_OF_MEMORY, _T("hook registry"), _T("get_hook()"), 0);
     return 1;
   }
-  HKEY key;
+  HKEY key = 0;
   long error = open_registry(service_name, registry, KEY_READ, &key, false);
   if (! key) {
     if (error == ERROR_FILE_NOT_FOUND) {

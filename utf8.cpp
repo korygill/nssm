@@ -40,8 +40,10 @@ void unsetup_utf8() {
   no conversion was done.
 */
 int to_utf8(const wchar_t *utf16, char **utf8, unsigned long *utf8len) {
+  if (! utf8) return 1;
   *utf8 = 0;
   if (utf8len) *utf8len = 0;
+  if (! utf16) return 1;
   int size = WideCharToMultiByte(CP_UTF8, 0, utf16, -1, NULL, 0, NULL, NULL);
   if (! size) return 1;
 
@@ -60,8 +62,10 @@ int to_utf8(const wchar_t *utf16, char **utf8, unsigned long *utf8len) {
 }
 
 int to_utf8(const char *ansi, char **utf8, unsigned long *utf8len) {
+  if (! utf8) return 1;
   *utf8 = 0;
   if (utf8len) *utf8len = 0;
+  if (! ansi) return 1;
   size_t len = strlen(ansi);
   int size = (int) len + 1;
 
@@ -75,8 +79,10 @@ int to_utf8(const char *ansi, char **utf8, unsigned long *utf8len) {
 }
 
 int to_utf16(const char *utf8, wchar_t **utf16, unsigned long *utf16len) {
+  if (! utf16) return 1;
   *utf16 = 0;
   if (utf16len) *utf16len = 0;
+  if (! utf8) return 1;
   int size = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
   if (! size) return 1;
 
@@ -95,8 +101,10 @@ int to_utf16(const char *utf8, wchar_t **utf16, unsigned long *utf16len) {
 }
 
 int to_utf16(const wchar_t *unicode, wchar_t **utf16, unsigned long *utf16len) {
+  if (! utf16) return 1;
   *utf16 = 0;
   if (utf16len) *utf16len = 0;
+  if (! unicode) return 1;
   size_t len = wcslen(unicode);
   int size = ((int) len + 1) * sizeof(wchar_t);
 

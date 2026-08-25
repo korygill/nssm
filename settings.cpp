@@ -138,7 +138,7 @@ static int setting_dump_string(const TCHAR *service_name, void *param, const TCH
   }
   else quoted_additional[0] = _T('\0');
 
-  unsigned long type = (unsigned long) param;
+  unsigned long type = (unsigned long) (DWORD_PTR) param;
   if (is_string_type(type)) {
     if (_tcslen(value->string)) {
       if (quote(value->string, quoted_value, _countof(quoted_value))) return 2;
@@ -156,7 +156,7 @@ static int setting_dump_string(const TCHAR *service_name, void *param, const TCH
 
 static int setting_set_exit_action(const TCHAR *service_name, void *param, const TCHAR *name, void *default_value, value_t *value, const TCHAR *additional) {
   unsigned long exitcode;
-  TCHAR *code;
+  TCHAR *code = 0;
   TCHAR action_string[ACTION_LEN];
 
   if (additional) {
@@ -742,8 +742,8 @@ static int native_set_dependongroup(const TCHAR *service_name, void *param, cons
   /*
     Get existing service dependencies because we must set both types together.
   */
-  TCHAR *services_buffer;
-  unsigned long services_buflen;
+  TCHAR *services_buffer = 0;
+  unsigned long services_buflen = 0;
   if (get_service_dependencies(service_name, service_handle, &services_buffer, &services_buflen, DEPENDENCY_SERVICES)) return -1;
 
   if (! value || ! value->string || ! value->string[0]) {
@@ -758,8 +758,8 @@ static int native_set_dependongroup(const TCHAR *service_name, void *param, cons
   }
 
   /* Update the group list. */
-  TCHAR *groups_buffer;
-  unsigned long groups_buflen;
+  TCHAR *groups_buffer = 0;
+  unsigned long groups_buflen = 0;
   if (native_set_dependon(service_name, service_handle, &groups_buffer, &groups_buflen, value, DEPENDENCY_GROUPS)) return -1;
 
   TCHAR *dependencies;
@@ -857,8 +857,8 @@ static int native_set_dependonservice(const TCHAR *service_name, void *param, co
   /*
     Get existing group dependencies because we must set both types together.
   */
-  TCHAR *groups_buffer;
-  unsigned long groups_buflen;
+  TCHAR *groups_buffer = 0;
+  unsigned long groups_buflen = 0;
   if (get_service_dependencies(service_name, service_handle, &groups_buffer, &groups_buflen, DEPENDENCY_GROUPS)) return -1;
 
   if (! value || ! value->string || ! value->string[0]) {
@@ -873,8 +873,8 @@ static int native_set_dependonservice(const TCHAR *service_name, void *param, co
   }
 
   /* Update the service list. */
-  TCHAR *services_buffer;
-  unsigned long services_buflen;
+  TCHAR *services_buffer = 0;
+  unsigned long services_buflen = 0;
   if (native_set_dependon(service_name, service_handle, &services_buffer, &services_buflen, value, DEPENDENCY_SERVICES)) return -1;
 
   TCHAR *dependencies;
@@ -1393,7 +1393,7 @@ int dump_setting(const TCHAR *service_name, HKEY key, SC_HANDLE service_handle, 
   if (setting->native) ret = get_setting(service_name, service_handle, setting, &value, 0);
   else ret = get_setting(service_name, key, setting, &value, 0);
   if (ret != 1) return ret;
-  return setting_dump_string(service_name, (void *) setting->type, setting->name, &value, 0);
+  return setting_dump_string(service_name, (void *) (DWORD_PTR) setting->type, setting->name, &value, 0);
 }
 
 settings_t settings[] = {

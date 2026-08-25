@@ -37,6 +37,7 @@ set md=%BUILD_ID:*-=%
 call set year=%%BUILD_ID:%md%=%%
 set year=%year:~0,-1%
 if "%BUILD_ID%" == "" set year=
+if "%year%" == "" set year=%DATE:~-4%
 
 @rem Create version.h.
 @echo>version.h.new #define NSSM_VERSION _T("%description%")

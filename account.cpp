@@ -8,6 +8,10 @@
 
 extern imports_t imports;
 
+void free_sid(SID *sid) {
+  if (sid) HeapFree(GetProcessHeap(), 0, sid);
+}
+
 /* Open Policy object. */
 int open_lsa_policy(LSA_HANDLE *policy) {
   LSA_OBJECT_ATTRIBUTES attributes;
@@ -53,7 +57,10 @@ int username_sid(const TCHAR *username, SID **sid, LSA_HANDLE *policy) {
   else {
     TCHAR computername[MAX_COMPUTERNAME_LENGTH + 1];
     expandedlen = _countof(computername);
-    GetComputerName(computername, &expandedlen);
+    if (! GetComputerName(computername, &expandedlen)) {
+      if (policy == &handle) LsaClose(handle);
+      return 3;
+    }
     expandedlen += (unsigned long) _tcslen(username);
 
     expanded = (TCHAR *) HeapAlloc(GetProcessHeap(), 0, expandedlen * sizeof(TCHAR));
@@ -66,24 +73,25 @@ int username_sid(const TCHAR *username, SID **sid, LSA_HANDLE *policy) {
   }
 
   LSA_UNICODE_STRING lsa_username;
-  int ret = to_utf16(expanded, &lsa_username.Buffer, (unsigned long *) &lsa_username.Length);
+  unsigned long utf16len = 0;
+  int ret = to_utf16(expanded, &lsa_username.Buffer, &utf16len);
   HeapFree(GetProcessHeap(), 0, expanded);
   if (ret) {
     if (policy == &handle) LsaClose(handle);
     print_message(stderr, NSSM_MESSAGE_OUT_OF_MEMORY, _T("LSA_UNICODE_STRING"), _T("username_sid()"));
     return 4;
   }
-  lsa_username.Length *= sizeof(wchar_t);
+  lsa_username.Length = (unsigned short) (utf16len * sizeof(wchar_t));
   lsa_username.MaximumLength = lsa_username.Length + sizeof(wchar_t);
 
-  LSA_REFERENCED_DOMAIN_LIST *translated_domains;
-  LSA_TRANSLATED_SID *translated_sid;
+  LSA_REFERENCED_DOMAIN_LIST *translated_domains = 0;
+  LSA_TRANSLATED_SID *translated_sid = 0;
   NTSTATUS status = LsaLookupNames(*policy, 1, &lsa_username, &translated_domains, &translated_sid);
   HeapFree(GetProcessHeap(), 0, lsa_username.Buffer);
   if (policy == &handle) LsaClose(handle);
   if (status != STATUS_SUCCESS) {
-    LsaFreeMemory(translated_domains);
-    LsaFreeMemory(translated_sid);
+    if (translated_domains) LsaFreeMemory(translated_domains);
+    if (translated_sid) LsaFreeMemory(translated_sid);
     print_message(stderr, NSSM_MESSAGE_LSALOOKUPNAMES_FAILED, username, error_string(LsaNtStatusToWinError(status)));
     return 5;
   }
@@ -95,6 +103,13 @@ int username_sid(const TCHAR *username, SID **sid, LSA_HANDLE *policy) {
       print_message(stderr, NSSM_GUI_INVALID_USERNAME, username);
       return 6;
     }
+  }
+
+  if (translated_sid->DomainIndex < 0 || (ULONG) translated_sid->DomainIndex >= translated_domains->Entries) {
+    LsaFreeMemory(translated_domains);
+    LsaFreeMemory(translated_sid);
+    print_message(stderr, NSSM_GUI_INVALID_USERNAME, username);
+    return 7;
   }
 
   LSA_TRUST_INFORMATION *trust = &translated_domains->Domains[translated_sid->DomainIndex];
@@ -121,6 +136,7 @@ int username_sid(const TCHAR *username, SID **sid, LSA_HANDLE *policy) {
   if (! InitializeSid(*sid, GetSidIdentifierAuthority(trust->Sid), *n + 1)) {
     error = GetLastError();
     HeapFree(GetProcessHeap(), 0, *sid);
+    *sid = 0;
     LsaFreeMemory(translated_domains);
     LsaFreeMemory(translated_sid);
     print_message(stderr, NSSM_MESSAGE_INITIALIZESID_FAILED, username, error_string(error));
@@ -136,6 +152,8 @@ int username_sid(const TCHAR *username, SID **sid, LSA_HANDLE *policy) {
   ret = 0;
   if (translated_sid->Use == SidTypeWellKnownGroup && ! well_known_sid(*sid)) {
     print_message(stderr, NSSM_GUI_INVALID_USERNAME, username);
+    HeapFree(GetProcessHeap(), 0, *sid);
+    *sid = 0;
     ret = 10;
   }
 
@@ -150,53 +168,67 @@ int username_sid(const TCHAR *username, SID **sid) {
 }
 
 int canonicalise_username(const TCHAR *username, TCHAR **canon) {
-  LSA_HANDLE policy;
+  LSA_HANDLE policy = 0;
+  SID *sid = 0;
+  LSA_REFERENCED_DOMAIN_LIST *translated_domains = 0;
+  LSA_TRANSLATED_NAME *translated_name = 0;
+  wchar_t *canon_buffer = 0;
+  int ret = 0;
+  PSID sids = 0;
+  NTSTATUS status;
+  LSA_TRUST_INFORMATION *trust = 0;
+  LSA_UNICODE_STRING lsa_canon;
+  unsigned long canonlen = 0;
+
   if (open_lsa_policy(&policy)) return 1;
 
-  SID *sid;
-  if (username_sid(username, &sid, &policy)) return 2;
-  PSID sids = { sid };
+  if (username_sid(username, &sid, &policy)) {
+    ret = 2;
+    goto done;
+  }
+  sids = sid;
 
-  LSA_REFERENCED_DOMAIN_LIST *translated_domains;
-  LSA_TRANSLATED_NAME *translated_name;
-  NTSTATUS status = LsaLookupSids(policy, 1, &sids, &translated_domains, &translated_name);
+  status = LsaLookupSids(policy, 1, &sids, &translated_domains, &translated_name);
   if (status != STATUS_SUCCESS) {
-    LsaFreeMemory(translated_domains);
-    LsaFreeMemory(translated_name);
     print_message(stderr, NSSM_MESSAGE_LSALOOKUPSIDS_FAILED, error_string(LsaNtStatusToWinError(status)));
-    return 3;
+    ret = 3;
+    goto done;
   }
 
-  LSA_TRUST_INFORMATION *trust = &translated_domains->Domains[translated_name->DomainIndex];
-  LSA_UNICODE_STRING lsa_canon;
+  if (translated_name->DomainIndex < 0 || (ULONG) translated_name->DomainIndex >= translated_domains->Entries) {
+    print_message(stderr, NSSM_GUI_INVALID_USERNAME, username);
+    ret = 8;
+    goto done;
+  }
+
+  trust = &translated_domains->Domains[translated_name->DomainIndex];
   lsa_canon.Length = translated_name->Name.Length + trust->Name.Length + sizeof(wchar_t);
   lsa_canon.MaximumLength = lsa_canon.Length + sizeof(wchar_t);
-  lsa_canon.Buffer = (wchar_t *) HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, lsa_canon.MaximumLength);
-  if (! lsa_canon.Buffer) {
-    LsaFreeMemory(translated_domains);
-    LsaFreeMemory(translated_name);
-    print_message(stderr, NSSM_MESSAGE_OUT_OF_MEMORY, _T("lsa_canon"), _T("username_sid"));
-    return 9;
+  canon_buffer = (wchar_t *) HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, lsa_canon.MaximumLength);
+  if (! canon_buffer) {
+    print_message(stderr, NSSM_MESSAGE_OUT_OF_MEMORY, _T("lsa_canon"), _T("canonicalise_username"));
+    ret = 9;
+    goto done;
   }
+  lsa_canon.Buffer = canon_buffer;
 
   /* Buffer is wchar_t but Length is in bytes. */
   memmove((char *) lsa_canon.Buffer, trust->Name.Buffer, trust->Name.Length);
   memmove((char *) lsa_canon.Buffer + trust->Name.Length, L"\\", sizeof(wchar_t));
   memmove((char *) lsa_canon.Buffer + trust->Name.Length + sizeof(wchar_t), translated_name->Name.Buffer, translated_name->Name.Length);
 
-  unsigned long canonlen;
   if (from_utf16(lsa_canon.Buffer, canon, &canonlen)) {
-    LsaFreeMemory(translated_domains);
-    LsaFreeMemory(translated_name);
-    print_message(stderr, NSSM_MESSAGE_OUT_OF_MEMORY, _T("canon"), _T("username_sid"));
-    return 10;
+    print_message(stderr, NSSM_MESSAGE_OUT_OF_MEMORY, _T("canon"), _T("canonicalise_username"));
+    ret = 10;
   }
-  HeapFree(GetProcessHeap(), 0, lsa_canon.Buffer);
 
-  LsaFreeMemory(translated_domains);
-  LsaFreeMemory(translated_name);
-
-  return 0;
+done:
+  if (canon_buffer) HeapFree(GetProcessHeap(), 0, canon_buffer);
+  if (translated_domains) LsaFreeMemory(translated_domains);
+  if (translated_name) LsaFreeMemory(translated_name);
+  free_sid(sid);
+  if (policy) LsaClose(policy);
+  return ret;
 }
 
 /* Do two usernames map to the same SID? */
@@ -205,15 +237,15 @@ int username_equiv(const TCHAR *a, const TCHAR *b) {
   if (username_sid(a, &sid_a)) return 0;
 
   if (username_sid(b, &sid_b)) {
-    FreeSid(sid_a);
+    free_sid(sid_a);
     return 0;
   }
 
   int ret = 0;
   if (EqualSid(sid_a, sid_b)) ret = 1;
 
-  FreeSid(sid_a);
-  FreeSid(sid_b);
+  free_sid(sid_a);
+  free_sid(sid_b);
 
   return ret;
 }
@@ -229,7 +261,7 @@ int is_localsystem(const TCHAR *username) {
   int ret = 0;
   if (imports.IsWellKnownSid(sid, WinLocalSystemSid)) ret = 1;
 
-  FreeSid(sid);
+  free_sid(sid);
 
   return ret;
 }
@@ -254,6 +286,7 @@ int is_virtual_account(const TCHAR *service_name, const TCHAR *username) {
   if (! username) return 0;
 
   TCHAR *canon = virtual_account(service_name);
+  if (! canon) return 0;
   int ret = str_equiv(canon, username);
   HeapFree(GetProcessHeap(), 0, canon);
   return ret;
@@ -278,7 +311,7 @@ const TCHAR *well_known_username(const TCHAR *username) {
   if (username_sid(username, &sid)) return 0;
 
   const TCHAR *well_known = well_known_sid(sid);
-  FreeSid(sid);
+  free_sid(sid);
 
   return well_known;
 }
@@ -306,17 +339,18 @@ int grant_logon_as_service(const TCHAR *username) {
     Shouldn't happen because it should have been checked before callling this function.
   */
   if (well_known_sid(sid)) {
+    free_sid(sid);
     LsaClose(policy);
     return 3;
   }
 
   /* Check if the SID has the "Log on as a service" right. */
   LSA_UNICODE_STRING lsa_right;
-  lsa_right.Buffer = NSSM_LOGON_AS_SERVICE_RIGHT;
+  lsa_right.Buffer = const_cast<wchar_t *>(NSSM_LOGON_AS_SERVICE_RIGHT);
   lsa_right.Length = (unsigned short) wcslen(lsa_right.Buffer) * sizeof(wchar_t);
   lsa_right.MaximumLength = lsa_right.Length + sizeof(wchar_t);
 
-  LSA_UNICODE_STRING *rights;
+  LSA_UNICODE_STRING *rights = 0;
   unsigned long count = ~0;
   status = LsaEnumerateAccountRights(policy, sid, &rights, &count);
   if (status != STATUS_SUCCESS) {
@@ -326,27 +360,29 @@ int grant_logon_as_service(const TCHAR *username) {
     */
     unsigned long error = LsaNtStatusToWinError(status);
     if (error != ERROR_FILE_NOT_FOUND) {
-      FreeSid(sid);
+      free_sid(sid);
       LsaClose(policy);
       print_message(stderr, NSSM_MESSAGE_LSAENUMERATEACCOUNTRIGHTS_FAILED, username, error_string(error));
       return 4;
     }
+    rights = 0;
+    count = 0;
   }
 
   for (unsigned long i = 0; i < count; i++) {
     if (rights[i].Length != lsa_right.Length) continue;
     if (_wcsnicmp(rights[i].Buffer, lsa_right.Buffer, lsa_right.MaximumLength)) continue;
     /* The SID has the right. */
-    FreeSid(sid);
+    free_sid(sid);
     LsaFreeMemory(rights);
     LsaClose(policy);
     return 0;
   }
-  LsaFreeMemory(rights);
+  if (rights) LsaFreeMemory(rights);
 
   /* Add the right. */
   status = LsaAddAccountRights(policy, sid, &lsa_right, 1);
-  FreeSid(sid);
+  free_sid(sid);
   LsaClose(policy);
   if (status != STATUS_SUCCESS) {
     print_message(stderr, NSSM_MESSAGE_LSAADDACCOUNTRIGHTS_FAILED, error_string(LsaNtStatusToWinError(status)));
