@@ -3,14 +3,12 @@
 extern imports_t imports;
 
 HANDLE get_debug_token() {
-  long error;
-  HANDLE token;
+  HANDLE token = NULL;
   if (! OpenThreadToken(GetCurrentThread(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, false, &token)) {
-    error = GetLastError();
-    if (error == ERROR_NO_TOKEN) {
-      (void) ImpersonateSelf(SecurityImpersonation);
-      (void) OpenThreadToken(GetCurrentThread(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, false, &token);
-    }
+    unsigned long error = GetLastError();
+    if (error != ERROR_NO_TOKEN) return INVALID_HANDLE_VALUE;
+    if (! ImpersonateSelf(SecurityImpersonation)) return INVALID_HANDLE_VALUE;
+    if (! OpenThreadToken(GetCurrentThread(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, false, &token)) return INVALID_HANDLE_VALUE;
   }
   if (! token) return INVALID_HANDLE_VALUE;
 

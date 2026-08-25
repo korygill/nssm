@@ -1,7 +1,7 @@
 #include "nssm.h"
 
 extern unsigned long tls_index;
-extern bool is_admin;
+extern BOOL is_admin;
 extern imports_t imports;
 
 static TCHAR unquoted_imagepath[PATH_LENGTH];
@@ -16,6 +16,7 @@ void nssm_exit(int status) {
 
 /* Are two strings case-insensitively equivalent? */
 int str_equiv(const TCHAR *a, const TCHAR *b) {
+  if (! a || ! b) return 0;
   size_t len = _tcslen(a);
   if (_tcslen(b) != len) return 0;
   if (_tcsnicmp(a, b, len)) return 0;
@@ -179,13 +180,13 @@ int usage(int ret) {
 }
 
 void check_admin() {
-  is_admin = false;
+  is_admin = FALSE;
 
   /* Lifted from MSDN examples */
   PSID AdministratorsGroup;
   SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
   if (! AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &AdministratorsGroup)) return;
-  CheckTokenMembership(0, AdministratorsGroup, /*XXX*/(PBOOL) &is_admin);
+  CheckTokenMembership(0, AdministratorsGroup, &is_admin);
   FreeSid(AdministratorsGroup);
 }
 
@@ -208,7 +209,7 @@ static int elevate(int argc, TCHAR **argv, unsigned long message) {
   _sntprintf_s(args, EXE_LENGTH, _TRUNCATE, _T("%s"), GetCommandLine());
   size_t s = _tcslen(argv[0]) + 1;
   if (args[0] == _T('"')) s += 2;
-  while (isspace(args[s])) s++;
+  while (_istspace(args[s])) s++;
 
   sei.lpParameters = args + s;
   sei.nShow = SW_SHOW;
@@ -221,10 +222,11 @@ static int elevate(int argc, TCHAR **argv, unsigned long message) {
 }
 
 int num_cpus() {
-  DWORD_PTR i, affinity, system_affinity;
+  DWORD_PTR affinity, system_affinity;
   if (! GetProcessAffinityMask(GetCurrentProcess(), &affinity, &system_affinity)) return 64;
-  for (i = 0; system_affinity & (1LL << i); i++) if (i == 64) break;
-  return (int) i;
+  int n = 0;
+  for (DWORD_PTR bit = 1; bit && (system_affinity & bit); bit <<= 1) n++;
+  return n;
 }
 
 const TCHAR *nssm_unquoted_imagepath() {
@@ -316,7 +318,8 @@ int _tmain(int argc, TCHAR **argv) {
   */
   if (! GetStdHandle(STD_INPUT_HANDLE)) {
     /* Start service magic */
-    SERVICE_TABLE_ENTRY table[] = { { NSSM, service_main }, { 0, 0 } };
+    TCHAR dispatcher_name[] = _T("NSSM");
+    SERVICE_TABLE_ENTRY table[] = { { dispatcher_name, service_main }, { 0, 0 } };
     if (! StartServiceCtrlDispatcher(table)) {
       unsigned long error = GetLastError();
       /* User probably ran nssm with no argument */

@@ -30,9 +30,14 @@
 #else
 #define PATH_LENGTH MAX_PATH
 #endif
-#define DIR_LENGTH PATH_LENGTH - 12
+#define DIR_LENGTH (PATH_LENGTH - 12)
 
-#define _WIN32_WINNT 0x0500
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
+#endif
+#ifndef WINVER
+#define WINVER _WIN32_WINNT
+#endif
 
 #define APSTUDIO_HIDDEN_SYMBOLS
 #include <windows.h>

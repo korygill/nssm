@@ -35,7 +35,7 @@ static HANDLE create_logging_thread(TCHAR *service_name, TCHAR *path, unsigned l
         SetHandleInformation(*pipe_handle_ptr, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
       }
       else {
-        log_event(EVENTLOG_ERROR_TYPE, NSSM_EVENT_CREATEPIPE_FAILED, service_name, path, error_string(GetLastError()));
+        log_event(EVENTLOG_ERROR_TYPE, NSSM_EVENT_CREATEPIPE_FAILED, service_name, path, error_string(GetLastError()), 0);
         return (HANDLE) 0;
       }
     }
@@ -91,8 +91,12 @@ void close_handle(HANDLE *handle, HANDLE *remember) {
   if (remember) *remember = INVALID_HANDLE_VALUE;
   if (! handle) return;
   if (! *handle) return;
+  if (remember) {
+    *remember = *handle;
+    *handle = 0;
+    return;
+  }
   CloseHandle(*handle);
-  if (remember) *remember = *handle;
   *handle = 0;
 }
 
@@ -210,7 +214,7 @@ static void rotated_filename(TCHAR *path, TCHAR *rotated, unsigned long rotated_
   }
 
   TCHAR buffer[PATH_LENGTH];
-  memmove(buffer, path, sizeof(buffer));
+  _tcsncpy_s(buffer, _countof(buffer), path, _TRUNCATE);
   TCHAR *ext = PathFindExtension(buffer);
   TCHAR extension[PATH_LENGTH];
   _sntprintf_s(extension, _countof(extension), _TRUNCATE, _T("-%04u%02u%02uT%02u%02u%02u.%03u%s"), st->wYear, st->wMonth, st->wDay, st->wHour, st->wMinute, st->wSecond, st->wMilliseconds, ext);
@@ -281,10 +285,13 @@ void rotate_file(TCHAR *service_name, TCHAR *path, unsigned long seconds, unsign
     function = _T("CopyFile()");
     if (CopyFile(path, rotated, TRUE)) {
       file = write_to_file(path, NSSM_STDOUT_SHARING, 0, NSSM_STDOUT_DISPOSITION, NSSM_STDOUT_FLAGS);
-      Sleep(delay);
-      SetFilePointer(file, 0, 0, FILE_BEGIN);
-      SetEndOfFile(file);
-      CloseHandle(file);
+      if (file == INVALID_HANDLE_VALUE) ok = false;
+      else {
+        Sleep(delay);
+        SetFilePointer(file, 0, 0, FILE_BEGIN);
+        SetEndOfFile(file);
+        CloseHandle(file);
+      }
     }
     else ok = false;
   }
@@ -318,7 +325,7 @@ int get_output_handles(nssm_service_t *service, STARTUPINFO *si) {
       return 2;
     }
 
-    inherit_handles = true;
+    inherit_handles = true;
   }
 
   /* stdout */
@@ -345,7 +352,7 @@ int get_output_handles(nssm_service_t *service, STARTUPINFO *si) {
 
     if (dup_handle(service->stdout_si, &si->hStdOutput, _T("stdout_si"), _T("stdout"))) close_handle(&service->stdout_thread);
 
-    inherit_handles = true;
+    inherit_handles = true;
   }
 
   /* stderr */
@@ -385,7 +392,7 @@ int get_output_handles(nssm_service_t *service, STARTUPINFO *si) {
 
     if (dup_handle(service->stderr_si, &si->hStdError, _T("stderr_si"), _T("stderr"))) close_handle(&service->stderr_thread);
 
-    inherit_handles = true;
+    inherit_handles = true;
   }
 
   /*
@@ -434,13 +441,19 @@ void cleanup_loggers(nssm_service_t *service) {
   /* Close write end of the data pipe so logging thread can finalise read. */
   close_handle(&service->stdout_si);
   /* Await logging thread then close read end. */
-  if (thread_handle != INVALID_HANDLE_VALUE) WaitForSingleObject(thread_handle, interval);
+  if (thread_handle != INVALID_HANDLE_VALUE) {
+    WaitForSingleObject(thread_handle, interval);
+    CloseHandle(thread_handle);
+  }
   close_handle(&service->stdout_pipe);
 
   thread_handle = INVALID_HANDLE_VALUE;
   close_handle(&service->stderr_thread, &thread_handle);
   close_handle(&service->stderr_si);
-  if (thread_handle != INVALID_HANDLE_VALUE) WaitForSingleObject(thread_handle, interval);
+  if (thread_handle != INVALID_HANDLE_VALUE) {
+    WaitForSingleObject(thread_handle, interval);
+    CloseHandle(thread_handle);
+  }
   close_handle(&service->stderr_pipe);
 }
 

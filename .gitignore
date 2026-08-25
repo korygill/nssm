@@ -1,0 +1,9 @@
+out/**
+tmp/**
+.vs/
+*.user
+*.aps
+MSG*.bin
+messages.h
+messages.rc
+version.h

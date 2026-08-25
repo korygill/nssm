@@ -86,7 +86,8 @@ static void add_thread_handle(hook_thread_t *hook_threads, HANDLE thread_handle,
 
   int i;
   for (i = 0; i < hook_threads->num_threads; i++) memmove(&data[i], &hook_threads->data[i], sizeof(data[i]));
-  memmove(data[i].name, name, sizeof(data[i].name));
+  if (name) _tcsncpy_s(data[i].name, _countof(data[i].name), name, _TRUNCATE);
+  else data[i].name[0] = _T('\0');
   data[i].thread_handle = thread_handle;
 
   if (hook_threads->data) HeapFree(GetProcessHeap(), 0, hook_threads->data);

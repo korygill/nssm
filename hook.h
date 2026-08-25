@@ -13,7 +13,7 @@
 #define NSSM_HOOK_ACTION_RESUME _T("Resume")
 
 /* Hook name will be "<service> (<event>/<action>)" */
-#define HOOK_NAME_LENGTH SERVICE_NAME_LENGTH * 2
+#define HOOK_NAME_LENGTH (SERVICE_NAME_LENGTH * 2)
 
 #define NSSM_HOOK_VERSION 1
 
